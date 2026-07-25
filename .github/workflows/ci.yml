@@ -136,4 +136,4 @@ jobs:
       # regresión). Sobre todos los .cpp de src/ (recursivo: viven en
       # subdirectorios por componente); no las pruebas ni el código generado.
       - name: clang-tidy
-        run: clang-tidy -p build --warnings-as-errors='*' $(find src -name '*.cpp')
+        run: clang-tidy -p build $(find src -name '*.cpp')

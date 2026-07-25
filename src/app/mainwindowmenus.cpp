@@ -1030,6 +1030,7 @@ void MainWindow::createViewMenu()
         { QStringLiteral("pl"),    QStringLiteral("Polski") },
         { QStringLiteral("nl"),    QStringLiteral("Nederlands") },
         { QStringLiteral("ro"),    QStringLiteral("Română") },
+        { QStringLiteral("zh_TW"),  QStringLiteral("正體中文") },
     };
 
     QMenu *langMenu = viewMenu->addMenu(tr("Idioma"));

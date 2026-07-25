@@ -1,0 +1,72 @@
+name: Release (Windows Only Test)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch: # 允許在 GitHub Actions 頁面點擊按鈕手動觸發
+
+jobs:
+  build-windows:
+    name: Windows (ZIP portable)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 安裝 Qt 6.8.2 環境
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.2'
+          cache: true
+          arch: 'win64_msvc2022_64'
+
+      # 設定與編譯 (只編譯主程式 md-editor，不編譯測試專案以節省時間與 RAM)
+      - name: Configure & build
+        shell: pwsh
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel --target md-editor
+
+      # 使用 windeployqt 打包相依 DLL 檔
+      - name: Stage app (windeployqt)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item build/Release/md-editor.exe dist/
+          & windeployqt.exe --release --no-system-d3d-compiler --no-opengl-sw dist/md-editor.exe
+
+      # 壓縮成便攜版 ZIP 檔
+      - name: Package as portable ZIP
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME.TrimStart('v') } else { "test-build" }
+          Compress-Archive -Path dist/* -DestinationPath "md-editor-$version-windows-x64.zip"
+
+      # 將 ZIP 檔上傳至 Artifacts 區供測試下載
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable-zip
+          path: md-editor-*-windows-x64.zip
+
+  publish:
+    name: Publish release
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 建立 Release 需要寫入權限
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-portable-zip
+          path: artifacts
+
+      # 只有推 Tag (refs/tags/) 時才會自動建立 GitHub Release 頁面
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: artifacts/*

@@ -649,6 +649,43 @@ documento nuevo modificado para no sobrescribir la fuente.
     el cierre de un *fence* que sigue a una lista. Ambos **se estabilizan en una
     pasada** (no crecen, no hay pérdida de datos); arreglarlos exigiría des-wrappear
     la salida de Qt, con riesgo alto y valor casi nulo.
+- ✅ **El fuzzer no corría bajo sanitizers, al contrario de lo que decía el
+  código.** El comentario del punto anterior —y el del propio `CMakeLists`—
+  afirmaba que `tst_roundtripfuzz` era «la red de verdad bajo ASan/UBSan, lo corre
+  CI». No era cierto: **no está registrado en CTest** (a propósito) y el *job* de
+  sanitizers ejecuta `ctest`, así que nunca lo tocaba. *Hecho (28-07-2026):* hay un
+  *job* `fuzz` propio que lo invoca **directamente** —única vía, al no estar en
+  ctest— bajo ASan/UBSan, con `continue-on-error` para que no pueda bloquear una
+  release y `timeout-minutes` para que un cuelgue no queme el presupuesto de
+  Actions. `continue-on-error` y no tragarse el código de salida con `exit 0`: así
+  el fallo sigue **visible** en Actions, que un fuzzer que falla en silencio no
+  vale para nada. Los comentarios mentirosos, corregidos.
+- ✅ **Cuelgue del fuzzer en Windows: era un fallo de Qt, ya arreglado aguas
+  arriba.** Apareció al añadir Windows a la matriz de CI (25-07-2026):
+  `tst_roundtripfuzz.exe` moría allí con `0xC0000005` a los ~250 ms, en el caso
+  281. *Resuelto (28-07-2026)* tras tres rondas de bisección en CI:
+  - **No era del editor.** `tools/qtmdrepro`, que enlaza **solo `Qt6::Widgets`**,
+    revienta igual: `QTextDocument::setMarkdown` mata el proceso en Windows con un
+    documento que empieza y acaba por regla temática `---` sin salto de línea
+    final. **El caso mínimo son seis caracteres: `---\n\n---`.**
+  - **Dónde:** escritura fuera de rango en `QUtf8::convertFromUnicode`
+    (`mov byte ptr [rdx],cl`), vía `QtPrivate::convertToUtf8` ←
+    `QTextMarkdownImporter::import` ← `QTextDocument::setMarkdown`.
+  - **Particularidades:** solo con el marcador `---` (con `***` o `- - -` no pasa,
+    ni mezclándolos), solo con exactamente dos (con tres no pasa, ni con
+    `---\n---` pegadas), el contenido intermedio es indiferente y las
+    `MarkdownFeatures` también. Los acentos **no** pintan nada pese a que la traza
+    pase por `convertToUtf8`: esa fue la primera hipótesis y se probó y descartó.
+  - **Ya está arreglado en Qt.** El barrido de versiones (*job*
+    `qt-version-sweep`, solo `workflow_dispatch`) lo confirma: cae en **6.8.2** y
+    pasa en **6.9.3** y **6.10.3**. No hace falta reportarlo aguas arriba. (6.11
+    quedó sin probar: `aqtinstall` no encuentra sus datos, cosa del instalador.)
+  - **El rodeo se queda** mientras se soporte Qt 6.8 o anterior: `mdrender::protect()`
+    garantiza un `\n` final, que es inocuo por construcción —no cambia la
+    semántica del Markdown— y cubre el caso real, porque esto no era entrada
+    sintética: **cualquier `.md` que cerrase con `---` sin salto final tumbaba el
+    editor al abrirlo en Windows**. Para retirarlo hay que ver a `qtmdrepro`
+    dejar de caer en el CI de Windows, que para eso está.
 - ✅ **Golden tests de exportadores** — *Hecho:* `tst_goldenexport` fija la salida
   exacta de los serializadores propios y deterministas para un documento canónico,
   contra referencias en `tests/golden/` (LaTeX, el XML de DOCX/ODF, las piezas del
@@ -664,6 +701,35 @@ documento nuevo modificado para no sobrescribir la fuente.
 
 - ✅ **Símbolos especiales por categorías** — *Insertar → Símbolos especiales…*
   (módulo `mdsymbols` + diálogo `SymbolPicker`, 8 categorías).
+
+### Iconos de la barra flotante de tablas (2026-07-28)
+
+- ⬜ **Rehacer los siete iconos de `makeTableIcon`** (insertar/eliminar fila y
+  columna, alinear columna), que quedaron sin tocar cuando en la 2.8.2 se
+  rediseñaron los de lista y los de formato de carácter. Dos motivos, por orden
+  de importancia:
+  - **La insignia `+`/`−` es diminuta y está pegada a la retícula.** «Insertar
+    fila» y «eliminar fila» son el mismo dibujo salvo un trazo vertical de esa
+    insignia (radio `0,13 × N`), así que a tamaño real se distinguen por unos dos
+    píxeles; y como cae pegada al borde de las líneas, se lee como una línea más
+    de la tabla en vez de como una insignia —en «eliminar columna» la raya de
+    arriba parece el techo de la tabla, no un menos—. Es peor aquí que en la
+    barra de formato porque esta barra pinta a `fontMetrics().height() × 0,85`
+    ≈ 16 px (`EditorStack`, la llamada a `applyIcons`), aún más pequeño que los
+    18-22 px de la otra. Arreglo: separar la insignia de la retícula y darle
+    tamaño, o llevarla a una esquina como hacen los juegos de iconos que
+    distinguen «añadir» de «quitar».
+  - **Desajuste de familia.** Los de lista pasaron a dos renglones con trazo
+    grueso; estos siguen con la retícula de tres renglones finos. Nunca se ven a
+    la vez —una barra es de ventana y la otra flotante sobre la tabla—, así que
+    no chirría, pero ya no son el mismo juego.
+
+  Los **tres de alineación se salvan**: son el icono clásico de tres líneas con la
+  del medio más corta y se leen bien a cualquier tamaño; el trabajo es en los
+  cuatro de fila/columna. El banco de pruebas de `Auxiliar/icons` (variantes
+  parametrizadas + láminas de contacto a 18/22/28/36 px en claro y oscuro) sirve
+  para ensayarlo sin tocar `src/`: hoy solo cubre lista y formato, habría que
+  añadirle los de tabla. Prioridad baja: hoy son **ambiguos, no ilegibles**.
 
 ## ♿ Accesibilidad
 

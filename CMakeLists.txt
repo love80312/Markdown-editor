@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(md-editor
-    VERSION 2.8.0
+    VERSION 2.8.4
     DESCRIPTION "Editor/visor de archivos Markdown en Qt6"
     LANGUAGES CXX)
 
@@ -35,7 +35,10 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport LinguistTools)
+# Network: solo lo usa DictionaryInstaller, para descargar un diccionario cuando
+# el usuario lo pide (ver src/spell/dictionaryinstaller.h). Es parte de Qt, no
+# una dependencia de terceros nueva.
+find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport Network LinguistTools)
 
 # Qt6::GuiPrivate (el QZip del export ODF, ver más abajo) hay que asegurarlo a
 # mano porque las dos formas de obtenerlo son excluyentes según la versión:
@@ -203,6 +206,7 @@ add_library(md-editor-core STATIC
     src/diagram/diagramrenderer.h
     # --- spell ---
     src/spell/spellchecker.cpp
+    src/spell/dictionaryinstaller.cpp
     src/spell/spellchecker.h
     src/spell/spellcontroller.cpp
     src/spell/spellcontroller.h
@@ -252,7 +256,7 @@ add_library(md-editor-core STATIC
 # exporters.cpp reempaqueta el ODF para incrustarle el idioma sin dependencias
 # externas. Es API privada de Qt (puede cambiar entre versiones), pero no añade
 # ninguna biblioteca de terceros.
-target_link_libraries(md-editor-core PUBLIC Qt6::Widgets Qt6::PrintSupport Qt6::GuiPrivate)
+target_link_libraries(md-editor-core PUBLIC Qt6::Widgets Qt6::PrintSupport Qt6::Network Qt6::GuiPrivate)
 target_include_directories(md-editor-core PUBLIC
     src
     src/app
@@ -289,14 +293,53 @@ target_compile_definitions(md-editor-core PUBLIC APP_VERSION="${PROJECT_VERSION}
 #     y configurar con -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
 option(SPELL_CHECK "Corrector ortográfico (requiere Hunspell)" ON)
 option(SPELL_CHECK_STATIC "Enlazar Hunspell estáticamente (binario autocontenido)" ON)
+# Que Hunspell sea opcional está bien para quien compila; para lo que se PUBLICA
+# es una trampa: hasta la 2.8.3 los tres binarios descargables salieron sin
+# corrector —nadie instalaba Hunspell en el workflow— y nada lo avisó, porque
+# «no encontrado» solo imprime un STATUS. Los jobs de release configuran con
+# SPELL_CHECK_REQUIRED=ON para que eso rompa la build en vez de silenciarse.
+option(SPELL_CHECK_REQUIRED "Fallar si no se encuentra Hunspell (para empaquetar)" OFF)
 if(SPELL_CHECK)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
         pkg_check_modules(HUNSPELL hunspell)
     endif()
+    # Respaldo sin pkg-config: en Windows no suele estar (y vcpkg no siempre deja
+    # un .pc utilizable), así que sin esto el corrector se quedaba fuera de la
+    # build de Windows aunque Hunspell estuviera instalado — y el binario que se
+    # publicaba no tenía corrector sin que nada lo avisara. Busca cabecera y
+    # biblioteca a mano; el bloque de abajo (estático/dinámico) sigue igual.
+    if(NOT HUNSPELL_FOUND)
+        find_path(HUNSPELL_INCLUDE_DIR NAMES hunspell/hunspell.hxx hunspell.hxx)
+        find_library(HUNSPELL_LIBRARY NAMES hunspell hunspell-1.7 libhunspell)
+        if(HUNSPELL_INCLUDE_DIR AND HUNSPELL_LIBRARY)
+            set(HUNSPELL_FOUND TRUE)
+            set(HUNSPELL_INCLUDE_DIRS ${HUNSPELL_INCLUDE_DIR})
+            set(HUNSPELL_LIBRARIES ${HUNSPELL_LIBRARY})
+            set(HUNSPELL_VERSION "sin pkg-config")
+            message(STATUS "Corrector ortográfico: Hunspell encontrado sin pkg-config "
+                           "(${HUNSPELL_LIBRARY})")
+        endif()
+    endif()
     if(HUNSPELL_FOUND)
         target_compile_definitions(md-editor-core PUBLIC HAVE_HUNSPELL)
-        target_include_directories(md-editor-core PUBLIC ${HUNSPELL_INCLUDE_DIRS})
+        # `hunspell.pc` declara `Cflags: -I${includedir}/hunspell`, es decir la
+        # carpeta INTERIOR, mientras que el código incluye <hunspell/hunspell.hxx>.
+        # En Debian eso cuela de milagro porque la cabecera está además bajo
+        # /usr/include, que el compilador mira siempre; con Hunspell en un prefijo
+        # propio —el universal que se compila para macOS— no hay tal red y la
+        # compilación se cae con «'hunspell/hunspell.hxx' file not found». Se añade
+        # también el directorio padre, así valen las dos formas de incluirlo.
+        set(_hunspell_incs ${HUNSPELL_INCLUDE_DIRS})
+        foreach(_dir IN LISTS HUNSPELL_INCLUDE_DIRS)
+            get_filename_component(_leaf "${_dir}" NAME)
+            if(_leaf STREQUAL "hunspell")
+                get_filename_component(_parent "${_dir}" DIRECTORY)
+                list(APPEND _hunspell_incs "${_parent}")
+            endif()
+        endforeach()
+        list(REMOVE_DUPLICATES _hunspell_incs)
+        target_include_directories(md-editor-core PUBLIC ${_hunspell_incs})
 
         set(_hunspell_link ${HUNSPELL_LIBRARIES})  # dinámico por defecto del pkg
         if(SPELL_CHECK_STATIC)
@@ -327,6 +370,12 @@ if(SPELL_CHECK)
             message(STATUS "Corrector ortográfico: Hunspell ${HUNSPELL_VERSION} (dinámico)")
         endif()
         target_link_libraries(md-editor-core PUBLIC ${_hunspell_link})
+    elseif(SPELL_CHECK_REQUIRED)
+        message(FATAL_ERROR
+                "Corrector ortográfico: Hunspell no encontrado y SPELL_CHECK_REQUIRED=ON. "
+                "El binario saldría SIN corrector; para empaquetar hay que instalarlo "
+                "(libhunspell-dev / brew install hunspell / vcpkg) o compilarlo aparte y "
+                "apuntar CMAKE_PREFIX_PATH a su prefijo.")
     else()
         message(STATUS "Corrector ortográfico: Hunspell no encontrado, se omite "
                        "(instala libhunspell-dev / brew / vcpkg para activarlo)")
@@ -530,15 +579,43 @@ if(Qt6Test_FOUND)
         tst_tablifecycle
         tst_imageobject
         tst_chromezoom
+        tst_shortcuts
+        tst_help
         tst_filecontroller
         tst_formulacontroller)
         add_executable(${test} tests/${test}.cpp)
         target_link_libraries(${test} PRIVATE md-editor-core Qt6::Test)
         add_test(NAME ${test} COMMAND ${test})
         # Las pruebas usan QApplication: ejecútalas sin pantalla (headless).
+        #
+        # En Windows NO: su plugin «offscreen» no monta la base de datos de
+        # fuentes, y sin ella QTextDocument::toMarkdown() deja de emitir los
+        # marcadores de énfasis (entra «texto **negrita** aqui» y sale sin los
+        # asteriscos), además de tragarse toda la salida de QTest. Eso hacía
+        # fallar 7 pruebas —round-trip, pegado enriquecido, importadores,
+        # notas al pie y los 12 goldens, todos más cortos de la cuenta— por un
+        # defecto del entorno de pruebas, no del editor: con el plugin nativo
+        # pasan todas. Los runners de Windows tienen sesión de escritorio, así
+        # que el plugin nativo funciona sin más.
+        if(WIN32)
+            set(_qpa "windows")
+        else()
+            set(_qpa "offscreen")
+        endif()
+        # MD_EDITOR_NO_POPUPS: nada de ventanas emergentes automáticas. Las pruebas
+        # construyen MainWindow y abren documentos, y un aviso que aparece solo —el
+        # del diccionario que falta, que salta si el runner no tiene el del idioma
+        # del sistema— es una segunda ventana que nadie va a cerrar: bloqueaba dos
+        # pruebas en el CI. Vale también para cualquier arranque automatizado (el
+        # paso de humo del release lo usa).
         set_tests_properties(${test} PROPERTIES
-            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+            ENVIRONMENT "QT_QPA_PLATFORM=${_qpa};MD_EDITOR_NO_POPUPS=1")
     endforeach()
+
+    # tst_help valida los .md de ayuda tal como se empaquetan, leyéndolos del
+    # recurso Qt. El .qrc solo está en el ejecutable (la biblioteca no lo lleva),
+    # así que se compila también dentro de este test.
+    target_sources(tst_help PRIVATE src/resources.qrc)
 
     # Los golden tests necesitan la ruta a las referencias en el árbol fuente.
     target_compile_definitions(tst_goldenexport PRIVATE
@@ -550,15 +627,25 @@ if(Qt6Test_FOUND)
         DOCX_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/docx")
 
     # Fuzzer del round-trip: se COMPILA pero NO se registra como prueba de CTest.
-    # Es una herramienta de fuzzing manual/bajo demanda:
+    # Se ejecuta a mano:
     #     QT_QPA_PLATFORM=offscreen ./build/tst_roundtripfuzz
-    # No es una guardia de CI porque sus entradas adversarias pueden desbordar la
-    # pila DENTRO del parser Markdown de Qt según el build de Qt del entorno (visto
-    # en el runner de CI, no reproducible en local ni con la pila reducida). Mantener
-    # un test así en el gate bloquearía releases sin poder depurarlo. Su valor ya se
-    # cobró: cazó el desbordamiento de recursión del parser TeX (tope de profundidad).
+    # y en CI desde el job `fuzz`, que lo invoca directamente (no por ctest, que
+    # no lo ve) bajo ASan/UBSan y NO puede bloquear el workflow. Fuera del gate
+    # porque sus entradas adversarias van contra el parser Markdown de Qt, donde
+    # ya han aparecido dos fallos ajenos a esta app —un desbordamiento de pila
+    # dependiente del build de Qt y el cuelgue de setMarkdown en Windows—: con un
+    # test así en el gate, un fallo de Qt bloquearía la release. Su valor está en
+    # avisar, y lo ha dado dos veces: cazó el desbordamiento de recursión del
+    # parser TeX (de donde salió el tope de profundidad) y el cuelgue de Windows
+    # (de donde salió el rodeo de mdrender::protect).
     add_executable(tst_roundtripfuzz tests/tst_roundtripfuzz.cpp)
     target_link_libraries(tst_roundtripfuzz PRIVATE md-editor-core Qt6::Test)
+
+    # Reproductor del cuelgue del fuzzer en Windows. Enlaza SOLO Qt —nada de
+    # md-editor-core, que es justo lo que demuestra— y ejecuta una variante por
+    # proceso porque el fallo mata el proceso. Ver tools/qtmdrepro.cpp.
+    add_executable(qtmdrepro tools/qtmdrepro.cpp)
+    target_link_libraries(qtmdrepro PRIVATE Qt6::Widgets)
 
     # Guard de i18n: las traducciones deben estar completas y al día con el
     # código. Usa el lupdate de Qt6 (no el del PATH, que suele ser de Qt5).

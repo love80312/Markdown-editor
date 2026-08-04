@@ -18,7 +18,31 @@ QString mdrender::protect(const QString &markdown)
 {
     // Notas al pie primero, luego fórmulas; el super/subíndice al final (sus `^`/`~`
     // no interfieren con `$`/`[^id]`, y así sus centinelas ya no se ven como delimitadores).
-    return mdsupsub::protect(mdmath::protectMath(mdfootnote::protectFootnotes(markdown)));
+    QString out = mdsupsub::protect(mdmath::protectMath(mdfootnote::protectFootnotes(markdown)));
+
+    // Salto de línea final: RODEO a un fallo de Qt, no una preferencia de estilo.
+    // `QTextDocument::setMarkdown` **mata el proceso** en Windows (0xC0000005:
+    // escritura fuera de rango en QUtf8::convertFromUnicode, vía
+    // QTextMarkdownImporter) con un documento que empieza y acaba por una regla
+    // temática `---` sin salto de línea final. El caso mínimo son seis
+    // caracteres —`---\n\n---`— y basta un `\n` al final para esquivarlo. Que no
+    // es cosa nuestra lo demuestra `tools/qtmdrepro`, que enlaza solo Qt y
+    // revienta igual. Lo cazó tst_roundtripfuzz (caso 281), pero NO es entrada
+    // sintética: cualquier `.md` que cierre con `---` sin salto final tumbaba el
+    // editor al abrirlo.
+    //
+    // **Arreglado aguas arriba**: cae en Qt 6.8.2 y pasa en 6.9.3 y 6.10.3
+    // (barrido de versiones en el job `qt-version-sweep`). El rodeo se queda
+    // mientras se soporte Qt 6.8 o anterior; para retirarlo, ver a `qtmdrepro`
+    // dejar de caer en el CI de Windows.
+    //
+    // Va aquí porque `protect()` es el embudo por el que pasa TODO lo que se
+    // carga (DocumentIo::load, loadFromString y MainWindow::setBodyMarkdown), y
+    // es inocuo por construcción: un salto de línea al final no cambia la
+    // semántica del Markdown ni, por tanto, el documento resultante.
+    if (!out.endsWith(QLatin1Char('\n')))
+        out += QLatin1Char('\n');
+    return out;
 }
 
 void mdrender::renderPasses(QTextDocument *doc)

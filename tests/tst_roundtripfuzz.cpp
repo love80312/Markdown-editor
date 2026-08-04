@@ -5,6 +5,8 @@
 #include <QTextDocument>
 #include <QTextEdit>
 
+#include <cstdio>
+
 #include "markdownrender.h"
 #include "tableedit.h"
 
@@ -13,12 +15,18 @@
 // pasa, DOS veces, por la ruta REAL de abrir/guardar de la app:
 //   body → mdrender::setMarkdownWithExtensions(editor) → mdtable::documentMarkdown
 //
-// Invariante comprobada: **no crashea**. Es la red de verdad bajo ASan/UBSan (lo
-// corre CI): mete miles de combinaciones —fórmulas, tablas, notas al pie,
-// admoniciones, listas anidadas, código, y caracteres que estresan el escapado
-// (`* _ [ ] \ & | # < >` …)— por todo el pipeline de carga/render/serialización,
-// buscando accesos inválidos, asserts o cuelgues. La doble pasada ejercita también
-// la re-carga de la salida ya serializada.
+// Invariante comprobada: **no crashea**. Mete miles de combinaciones —fórmulas,
+// tablas, notas al pie, admoniciones, listas anidadas, código, y caracteres que
+// estresan el escapado (`* _ [ ] \ & | # < >` …)— por todo el pipeline de
+// carga/render/serialización, buscando accesos inválidos, asserts o cuelgues. La
+// doble pasada ejercita también la re-carga de la salida ya serializada.
+//
+// **Dónde corre.** No está registrado en CTest (ver el comentario de CMakeLists):
+// lo ejecuta a mano quien quiera y, en CI, el job `fuzz`, que lo invoca directo
+// bajo ASan/UBSan y no puede bloquear el workflow. Ojo con la tentación de
+// meterlo en el job de sanitizers: ese corre `ctest`, que no lo ve, así que
+// durante un tiempo los comentarios afirmaron que se fuzzeaba bajo sanitizers
+// cuando en realidad no se hacía nunca.
 //
 // **Por qué NO se comprueba convergencia/idempotencia aquí.** Sería lo natural en un
 // round-trip, pero `QTextDocument::toMarkdown` de Qt NO es idempotente para
@@ -200,10 +208,32 @@ QString TestRoundtripFuzz::document()
 
 void TestRoundtripFuzz::survivesAdversarialContent()
 {
+    // Si un caso mata el proceso, el fallo no deja rastro de CUÁL era: la salida
+    // se pierde con el crash y las semillas no se ven. Dos válvulas por entorno,
+    // que no cambian nada en una ejecución normal:
+    //   MD_FUZZ_TRACE=1  → escribe el índice de cada caso en stderr sin buffer,
+    //                      así el último impreso ES el que revienta.
+    //   MD_FUZZ_ONLY=N   → ejecuta solo el caso N y vuelca su documento, para
+    //                      reproducirlo aislado (el PRNG es determinista, así
+    //                      que N genera lo mismo en cualquier sistema).
+    const bool trace = !qEnvironmentVariableIsEmpty("MD_FUZZ_TRACE");
+    const int only = qEnvironmentVariableIntValue("MD_FUZZ_ONLY");
+
     constexpr int kCases = 2000;
     for (int i = 1; i <= kCases; ++i) {
+        if (only > 0 && i != only)
+            continue;
         seed(quint32(i) * 2654435761u);  // dispersa las semillas (Knuth)
         const QString body = document();
+        if (trace) {
+            std::fprintf(stderr, "caso %d (%lld caracteres)\n", i, qint64(body.size()));
+            std::fflush(stderr);
+        }
+        if (only > 0) {
+            std::fprintf(stderr, "--- documento del caso %d ---\n%s\n--- fin ---\n",
+                         i, qPrintable(body));
+            std::fflush(stderr);
+        }
 
         // Editor NUEVO por caso: cada documento renderiza fórmulas (que registran
         // un handler de objeto en su layout), notas al pie, etc. Reutilizar un solo
@@ -213,11 +243,41 @@ void TestRoundtripFuzz::survivesAdversarialContent()
         QTextEdit ed;
         ed.setAcceptRichText(true);
 
+        // Con MD_FUZZ_ONLY, vuelca la entrada EXACTA de cada pasada escapando
+        // todo lo que no sea ASCII imprimible. La segunda pasada recibe la
+        // salida ya serializada, que lleva dentro los centinelas de la PUA de
+        // las fórmulas: si lo que mata al proceso es esa, hay que verlo carácter
+        // a carácter, no en texto renderizado.
+        const auto dump = [only](const char *etiqueta, const QString &s) {
+            if (only <= 0)
+                return;
+            QString esc;
+            for (const QChar c : s) {
+                if (c.unicode() < 0x20 || c.unicode() > 0x7e)
+                    esc += QStringLiteral("\\u%1").arg(c.unicode(), 4, 16, QLatin1Char('0'));
+                else
+                    esc += c;
+            }
+            std::fprintf(stderr, "%s (%lld caracteres): %s\n", etiqueta,
+                         qint64(s.size()), qPrintable(esc));
+            std::fflush(stderr);
+        };
+
         // Doble pasada por el pipeline real. El objetivo es que no haya SIGSEGV,
         // assert ni error de sanitizer en ninguna de las etapas (proteger →
         // setMarkdown → pasadas de render → serialización con sentinelas).
+        if (trace) {
+            std::fprintf(stderr, "  caso %d pasada 1\n", i);
+            std::fflush(stderr);
+        }
+        dump("  entrada pasada 1", body);
         mdrender::setMarkdownWithExtensions(&ed, body);
         const QString once = mdtable::documentMarkdown(ed.document());
+        if (trace) {
+            std::fprintf(stderr, "  caso %d pasada 2\n", i);
+            std::fflush(stderr);
+        }
+        dump("  entrada pasada 2", once);
         mdrender::setMarkdownWithExtensions(&ed, once);
         const QString twice = mdtable::documentMarkdown(ed.document());
         Q_UNUSED(twice);

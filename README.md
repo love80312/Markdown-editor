@@ -5,11 +5,11 @@ TeX formulas, aligned tables, highlighted code, document templates, and export t
 PDF/DOCX/ODT/LaTeX — lightweight, portable (Qt6/C++17, zero external
 dependencies), in 9 languages.
 
-![Version](https://img.shields.io/badge/version-2.8.0-blue)
+![Version](https://img.shields.io/badge/version-2.8.4-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-green)
 
-![md-editor editing a document with TeX formulas, a code block, a chart, a table and a nested task list, with the outline panel open](docs/screenshot.png)
+![md-editor editing a document in a tab, with TeX formulas laid out in 2-D, a highlighted code block, a chart, callouts, a table and a nested task list, and the outline panel open](docs/screenshot.png)
 
 ---
 
@@ -17,12 +17,38 @@ dependencies), in 9 languages.
 
 | System | File | Notes |
 |--------|------|-------|
-| **Linux** (x86_64) | [`md-editor-2.8.0-x86_64.AppImage`](https://github.com/ManuelAriasCalleja/Markdown-editor/releases/latest) | Single-file executable. `chmod +x` and double-click. |
-| **Windows** (x64) | [`md-editor-2.8.0-windows-x64.zip`](https://github.com/ManuelAriasCalleja/Markdown-editor/releases/latest) | Portable: unzip and run `md-editor.exe`. |
-| **macOS** (Apple Silicon + Intel) | [`md-editor-2.8.0-macos-universal.dmg`](https://github.com/ManuelAriasCalleja/Markdown-editor/releases/latest) | First launch: Ctrl-click → *Open* (binary not signed). |
+| **Linux** (x86_64) | [`md-editor-2.8.4-x86_64.AppImage`](https://github.com/ManuelAriasCalleja/Markdown-editor/releases/latest) | Single-file executable. `chmod +x` and double-click. |
+| **Windows** (x64) | [`md-editor-2.8.4-windows-x64.zip`](https://github.com/ManuelAriasCalleja/Markdown-editor/releases/latest) | Portable: unzip and run `md-editor.exe`. |
+| **macOS** (Apple Silicon + Intel) | [`md-editor-2.8.4-macos-universal.dmg`](https://github.com/ManuelAriasCalleja/Markdown-editor/releases/latest) | First launch: Ctrl-click → *Open* (binary not signed). |
 
 > All downloads, including previous versions, on the
 > [releases page](https://github.com/ManuelAriasCalleja/Markdown-editor/releases).
+
+---
+
+## Installing on Linux
+
+The AppImage is a single self-contained executable — no installation, no root:
+
+1. `chmod +x md-editor-*-x86_64.AppImage`
+2. Run it (double-click, or `./md-editor-*-x86_64.AppImage document.md`).
+
+**If it does not start:**
+
+- *`dlopen(): error loading libfuse.so.2`* — AppImages mount themselves with
+  FUSE 2, which recent distributions no longer install by default. Either install
+  it (`sudo apt install libfuse2` on Debian/Ubuntu, `sudo dnf install fuse-libs`
+  on Fedora) or skip the mount altogether:
+  `./md-editor-*-x86_64.AppImage --appimage-extract-and-run`.
+- *`Could not load the Qt platform plugin "xcb"`* — a minimal or container-based
+  system is missing the X libraries Qt needs:
+  `sudo apt install libxcb-cursor0 libxkbcommon-x11-0 libfontconfig1`. Adding
+  `QT_DEBUG_PLUGINS=1` to the command prints which library is missing.
+- *Nothing happens on double-click* — the execute bit (step 1) is missing. Some
+  file managers stay silent about it; run it from a terminal to see the error.
+- The AppImage does not add itself to the applications menu. If you want an
+  entry, either use [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher)
+  or install from source (`sudo ./install.sh`), which does register it.
 
 ---
 
@@ -32,6 +58,18 @@ The Windows build is portable: **unzip and run `md-editor.exe`** — no installe
 The binary is not signed yet, so SmartScreen may show a blue *"Windows protected
 your PC"* screen on first run. To proceed, click **More info → Run anyway**. This
 only happens until the build earns SmartScreen reputation (or gets code-signed).
+
+**If it does not start:**
+
+- *`VCRUNTIME140.dll was not found`* (or `MSVCP140.dll`) — the app is built with
+  Microsoft's compiler and needs its runtime, which most machines already have.
+  Install the [Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+- *The app starts and closes immediately, or complains about a missing DLL* —
+  make sure you **extracted the whole ZIP**, not just `md-editor.exe`. The Qt
+  DLLs and the `platforms\` folder next to it are part of the program.
+- *Windows keeps warning about every file* — right-click the downloaded **ZIP** →
+  *Properties* → **Unblock**, and extract it again. Windows marks files that come
+  from the internet, and the mark survives extraction.
 
 ---
 
@@ -50,6 +88,17 @@ You only need to do this once; afterwards it launches normally with a
 double-click. Alternatively, after the blocked attempt, go to *System Settings →
 Privacy & Security* and click **Open anyway**.
 
+**If it does not start:**
+
+- *"md-editor is damaged and can't be opened. You should move it to the Trash"* —
+  the download is not corrupt: this is the quarantine flag macOS puts on unsigned
+  downloads. Remove it and open normally:
+  `xattr -dr com.apple.quarantine /Applications/md-editor.app`.
+- *Ctrl-click → Open does not offer an "Open" button* — on macOS 15 (Sequoia) and
+  later that shortcut is gone for unsigned apps. Launch it once (it will be
+  blocked), then go to *System Settings → Privacy & Security*, scroll down and
+  click **Open Anyway**.
+
 ---
 
 ## What it does
@@ -59,7 +108,10 @@ Privacy & Security* and click **Open anyway**.
 - **Multiple documents in tabs**: open several files at once, each in its own
   tab; the open tabs reopen on the next launch.
 - **Clean round-trip**: what you open is what you save. Aligned tables, quotes,
-  nested lists, task lists, footnotes, code blocks with syntax highlighting.
+  nested lists, task lists, footnotes, code blocks with syntax highlighting,
+  `==highlight==` and `^super^` / `~sub~` script.
+- **Type Markdown and it formats itself**: `# `, `> `, `- `, `1. ` at the start of
+  a line become the heading, quote or list in place, marker included.
 - **TeX formulas** `$…$` and `$$…$$` with real super- and subscripts and a
   live preview — no external dependencies. Double-click to edit.
 - **Diagrams**: `mermaid` and `plantuml` code blocks are previewed as an image
@@ -67,6 +119,11 @@ Privacy & Security* and click **Open anyway**.
   gracefully with an install hint if it is missing).
 - **Admonitions / callouts** (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`,
   `[!CAUTION]`) shown as coloured boxes, round-trip compatible with GitHub.
+- **Tables without the syntax**: a floating bar appears over the table to add or
+  remove rows and columns and set the column alignment; `Tab` walks the cells and
+  adds a row at the end; rows can be sorted by a column.
+- **Code blocks**: hovering shows the language (click to change it) and a button
+  that copies the block.
 - **Spell checking** (Hunspell): misspellings underlined in the document's
   language, with suggestions and a personal dictionary.
 - **Document templates** (*File → New from template*) and **reusable snippets**
@@ -81,11 +138,13 @@ Privacy & Security* and click **Open anyway**.
 - **Navigable outline panel** (F9), find and replace (Ctrl+F / Ctrl+H),
   autosave and crash recovery.
 - **Distraction-free mode** (F11) and **focus mode** (typewriter scrolling +
-  dimming), full-interface zoom (Ctrl+wheel), 6 light and dark themes including a
-  warm night light, Markdown source view (Ctrl+Shift+M).
+  dimming), full-interface zoom (Ctrl+wheel), 8 light and dark themes (including
+  GitHub, Monokai, Solarized and a true high-contrast one) plus an automatic warm
+  night light, Markdown source view and side-by-side split view.
 - **9 languages**: Spanish, English, German, French, Italian, Portuguese,
   Polish, Dutch and Romanian.
-- **Paste / drop images** from the clipboard straight to disk as `![](path)`.
+- **Paste images** from the clipboard straight to disk as `![](path)`, instead of
+  embedding them — so the Markdown stays portable.
 - **External file watching**: if the file changes on disk, the app detects it
   and offers to reload.
 - **Accessibility**: accessible names on the editor, panels and controls; status
@@ -98,12 +157,20 @@ Privacy & Security* and click **Open anyway**.
 |----------|--------|
 | `Ctrl+N` / `Ctrl+O` / `Ctrl+S` | New / Open / Save |
 | `Ctrl+Shift+S` / `Ctrl+P` | Save as… / Print |
+| `Ctrl+W` / `Ctrl+Shift+R` | Close tab / reopen the last closed one |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | Bold / Italic / Underline |
-| `Ctrl+K` / `Ctrl+Shift+F` | Insert link / formula |
+| `Ctrl+E` / `Ctrl+K` | Inline code / link |
+| `Ctrl+1`…`Ctrl+6` | Heading levels 1 to 6 |
+| `Ctrl+Shift+U` / `Ctrl+Shift+O` / `Ctrl+Shift+T` | Bullet / numbered / task list |
+| `Ctrl+Shift+F` | Insert formula |
+| `Ctrl+F` / `Ctrl+H` / `F3` | Find / replace / find next |
+| `Ctrl+G` / `Ctrl+L` | Go to heading / line |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Zoom in / out / reset |
-| `Ctrl+Shift+M` | View / edit the Markdown source |
+| `Ctrl+Shift+M` / `Ctrl+Shift+D` | Markdown source view / split view |
 | `Ctrl+Shift+P` | Command palette (find & run any action) |
-| `F11` / `F9` / `F1` | Distraction-free / Outline / Help |
+| `Ctrl+,` | Preferences |
+| `F11` / `F12` | Distraction-free mode / focus mode |
+| `F9` / `F1` | Outline / Help |
 
 Full list under *Help → Manual* inside the app.
 
@@ -119,7 +186,19 @@ Full list under *Help → Manual* inside the app.
 
 - CMake ≥ 3.16
 - Qt 6.5 or higher (modules `Widgets`, `PrintSupport`, `LinguistTools`, `Test`)
+  **plus its private headers**: the ODF export uses Qt's private QZip. On
+  Debian/Ubuntu these ship in a separate package from `qt6-base-dev`, and
+  without them CMake fails at configure time with *"Imported target
+  `Qt6::GuiPrivate` includes non-existent path"*.
 - A C++17 compiler (GCC 9+, Clang 10+, MSVC 19.20+)
+- **Optional**: Hunspell, for spell checking. Without it everything else builds
+  and the spell checker is simply inactive. On Linux the dictionaries are the
+  system ones (`hunspell-en-us`, `hunspell-es`…).
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install cmake g++ qt6-base-dev qt6-base-private-dev libhunspell-dev
+```
 
 ### Linux / macOS
 
@@ -145,8 +224,9 @@ build\Release\md-editor.exe
 ctest --test-dir build --output-on-failure
 ```
 
-Tests use **Qt Test** and run headless (`QT_QPA_PLATFORM=offscreen`, set by
-CMake).
+Tests use **Qt Test**. CMake picks the platform plugin per system: headless
+(`offscreen`) on Linux and macOS, native on Windows — where `offscreen` has no
+font database, which breaks Markdown serialisation and silences the test output.
 
 ### Installation (Linux, optional)
 

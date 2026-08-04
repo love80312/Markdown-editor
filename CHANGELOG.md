@@ -5,6 +5,152 @@ Todos los cambios relevantes de **md-editor** se documentan en este archivo.
 El formato sigue, a grandes rasgos, [Keep a Changelog](https://keepachangelog.com/es/),
 y el proyecto usa [versionado semántico](https://semver.org/lang/es/).
 
+## [2.8.4] — 2026-07-31
+
+Versión de mantenimiento, y con una corrección que valía por sí sola: **el
+corrector ortográfico no estaba en ninguno de los binarios que se descargaban**.
+El programa lo anunciaba en la página del proyecto y en su propio menú, y quien
+instalaba el AppImage, el ZIP o el DMG no lo tenía. De ahí salen casi todos los
+cambios de esta versión.
+
+### Corregido
+- **El corrector no funcionaba en ninguna descarga.** El empaquetado no instalaba
+  Hunspell en ningún sistema, así que el motor se compilaba como un armazón inerte
+  —el programa arrancaba igual, sin subrayar nada— y nada avisaba de ello: «no
+  encontrado» era un simple mensaje de estado en la compilación, y las pruebas del
+  corrector se saltan solas cuando no hay motor. Ahora viaja **dentro** del
+  ejecutable en los tres sistemas (en macOS, compilado universal para Intel y
+  Apple Silicon) y, para que no vuelva a pasar inadvertido, la compilación de
+  publicación **falla** si Hunspell no aparece.
+- **Windows y macOS se quedaban además sin diccionarios**, porque esos sistemas no
+  traen ninguno. Ahora los nueve idiomas de la interfaz viajan dentro del paquete,
+  con la licencia de cada uno. En Linux se siguen usando los del sistema.
+- **No había dónde poner un diccionario propio.** Las rutas de búsqueda eran todas
+  de solo lectura (dentro de un AppImage o de un `.app` no se puede escribir);
+  ahora se mira primero una carpeta del usuario, que es donde se pueden copiar a
+  mano y donde deja el suyo la descarga de abajo.
+
+### Añadido
+- **Aviso cuando falta el diccionario del documento**, en el idioma de la interfaz
+  y diciendo qué hacer: en Linux, la orden del gestor de paquetes de tu
+  distribución (apt, dnf, pacman, zypper o apk); en Windows y macOS, la carpeta
+  exacta donde copiar el `.aff` y el `.dic`. Y un botón **«Descargar e instalar»**
+  que lo baja y lo deja listo sin salir del programa ni pedir contraseña. Sale una
+  vez por idioma y sesión, y se puede desactivar desde el propio aviso.
+- **Los tres paquetes se arrancan antes de publicarse.** Hasta ahora nadie
+  ejecutaba nunca el archivo que se descarga: se compilaba, se empaquetaba y se
+  publicaba. Un empaquetado incompleto —una biblioteca que falta, un complemento
+  de Qt que no se copió— pasaba las pruebas y llegaba igual, porque eso no es
+  código, es el paquete. Ahora cada sistema arranca el suyo con un documento de
+  prueba, y en macOS se comprueba además que ninguna dependencia salga del bundle.
+- **Guía de instalación en la página del proyecto**, con una sección para Linux
+  (que no tenía) y, en los tres sistemas, qué hacer si no arranca: FUSE ausente y
+  el complemento `xcb` en Linux, el runtime de Visual C++ y el «Desbloquear» del
+  ZIP en Windows, y el mensaje «is damaged» —que es la cuarentena, no corrupción—
+  en macOS.
+
+## [2.8.3] — 2026-07-31
+
+Versión de mantenimiento. El zoom de la interfaz llegaba al editor pero se dejaba
+fuera dos sitios que se ven tanto como él: los rótulos de las pestañas y todos los
+diálogos.
+
+### Corregido
+- **El zoom no llegaba a las pestañas ni a los diálogos.** Con el zoom subido, los
+  nombres de los documentos abiertos y las ventanas de Preferencias, el manual,
+  «Acerca de», el mapa de caracteres, las fórmulas o cualquier aviso seguían con la
+  letra del principio: justo la letra pequeña que uno amplía por no verla. Un
+  diálogo es una ventana propia y Qt no le propaga la fuente de la ventana
+  principal, así que ahora se la fija el editor a cada uno en cuanto se abre —los
+  abra quien los abra, incluidos los diálogos del propio Qt—, y los que estén
+  abiertos la siguen si se cambia el zoom.
+- **El manual y «Acerca de» partían las líneas donde no tocaba.** Con la letra
+  ampliada, en la misma anchura de ventana cabe menos texto. Ahora las dos ventanas
+  crecen con la fuente (el manual, hasta lo que quepa en la pantalla).
+- **Los símbolos del mapa de caracteres no cabían en su casilla** al ampliar, y la
+  columna del índice del manual recortaba sus rótulos: ambos tamaños eran fijos en
+  píxeles y ahora se miden con la fuente en uso.
+
+## [2.8.2] — 2026-07-28
+
+Versión de mantenimiento. Tres atajos que se anunciaban y no funcionaban, el
+manual puesto al día con lo que hace de verdad el programa, y los iconos de lista
+de la barra rediseñados para que se distingan al tamaño al que se ven.
+
+### Corregido
+- **Ctrl+W no cerraba la pestaña.** El atajo se registraba con la constante
+  estándar de Qt, que en X11 tiene dos enlaces (Ctrl+F4 y Ctrl+W) de los que solo
+  se aplicaba el primero. Ahora valen los dos.
+- **F3 y Mayús+F3 no buscaban nada.** «Buscar siguiente» y «Buscar anterior»
+  estaban documentados en el manual pero no existían: no había ni acción de menú
+  ni atajo, solo los botones de la barra de búsqueda. Ahora repiten la última
+  búsqueda aunque la barra esté cerrada, sin quitarle el foco al editor, y abren
+  la barra si aún no se ha buscado nada.
+- **Preferencias se quedaba sin atajo.** La constante estándar de Qt para
+  «Preferencias» viene vacía fuera de macOS, así que Ctrl+, —anunciado en el
+  manual— no hacía nada en Linux ni en Windows.
+- **El manual describía cosas que no eran.** Decía que el diálogo de crear tabla
+  está en el menú Tabla (está en Insertar), que «Ordenar líneas» vive dentro de
+  «Transformar texto» (es una entrada aparte, y la única que exige selección) y
+  que arrastrar un archivo de imagen la inserta en el documento —arrastrar un
+  archivo lo abre en una pestaña, sea imagen o no; lo que guarda la imagen a
+  disco es pegarla del portapapeles—.
+
+### Cambiado
+- **Iconos de lista de la barra: se distinguen de un vistazo.** Los tres
+  compartían el 80 % del dibujo y se diferenciaban en un marcador de 5-6 px, con
+  las cifras «1 2 3» dibujadas con la fuente a un tamaño al que el suavizado las
+  deja en tres manchas grises. Pasan a dos renglones —que libera altura para el
+  marcador—, con las cifras trazadas a mano con el mismo grosor que las líneas y
+  las tareas como marcas de verificación sin recuadro. Los cuatro iconos de
+  formato (N/C/S/T) se centran ahora por la mancha real de la letra, no por la
+  caja de línea, que los dejaba altos dentro del botón.
+- **Manual completo en los nueve idiomas.** Se documentan el menú contextual de
+  las pestañas, «Insertar → Imagen…» y «Regla horizontal», Ctrl+H, los caracteres
+  sin espacios de las estadísticas y una tabla de atajos con los que faltaban
+  (Ctrl+E, Ctrl+K, Ctrl+Shift+X/Q/K/U/O/T, Ctrl+] y Ctrl+[, Ctrl+,). La guía de
+  Markdown incorpora las cuatro extensiones que el editor admite y no explicaba
+  —`==resaltado==`, `^super^`/`~sub~`, admoniciones y bloques mermaid/plantuml—
+  y el front matter.
+- **La página del proyecto (README) cuenta lo que hay**: reglas de entrada, barra
+  flotante de tablas, overlay de los bloques de código, vista dividida, los ocho
+  temas y una tabla de atajos de diecisiete filas en vez de ocho.
+
+### Añadido
+- Dos pruebas que vigilan lo que nadie compila: los atajos de la ventana
+  (incluida la ausencia de atajos ambiguos, que es lo que rompe uno sin avisar) y
+  los dieciocho archivos de ayuda —que cada enlace del índice caiga en un
+  encabezado real y que ninguna traducción se quede corta de secciones—. La
+  segunda encontró dos anclas rotas en el índice polaco.
+
+## [2.8.1] — 2026-07-28
+
+Versión de mantenimiento. Sin funciones nuevas: dos fallos que impedían usar el
+programa —uno al abrir cierto documento en Windows, otro al compilarlo con un Qt
+reciente— y el remate del portugués.
+
+### Corregido
+- **Windows: abrir un documento que cierre con `---` cerraba el programa.**
+  Cualquier `.md` que empezara y acabara por una regla horizontal `---` y no
+  terminara en salto de línea mataba el editor al abrirlo, sin mensaje. El fallo
+  no era del editor sino de Qt (una escritura fuera de rango en el importador de
+  Markdown, corregida por Qt en la 6.9); mientras se soporten las versiones
+  afectadas, el editor lo rodea. El caso mínimo eran seis caracteres.
+- **Portugués: una sola norma en toda la interfaz.** Se mezclaban vocabulario
+  europeo y brasileño para los mismos conceptos, y se veía en la misma sesión: el
+  menú decía «Salvar» mientras el resto hablaba de «ficheiro», y los diálogos de
+  abrir y guardar ofrecían «Ficheiros Markdown» y «Arquivos Markdown». Se ha
+  uniformado a la norma brasileña.
+
+### Cambiado
+- **Compila con Qt 6.11.** La configuración fallaba con las versiones recientes
+  de Qt, que ya no definen solo el objetivo `Qt6::GuiPrivate` que usa la
+  exportación a ODF; ahora se cubren las dos formas sin condicionar por número de
+  versión. Quien tuviera un Qt reciente no podía compilar la 2.8.0.
+- **Las pruebas se ejecutan también en Windows y macOS**, no solo en Linux: hasta
+  ahora los binarios de esas dos plataformas se publicaban sin que se hubiera
+  ejecutado ni una prueba sobre ellos. De ahí salió el fallo de Windows de arriba.
+
 ## [2.8.0] — 2026-07-25
 
 Repaso a fondo de la exportación y la importación: cada corrección nació de un
@@ -466,7 +612,11 @@ aplicaba; la suite pasa en build normal y bajo ASan+UBSan, y clang-tidy queda li
 - CI/CD multiplataforma (Linux AppImage, Windows ZIP, macOS DMG) y publicación
   de releases por tag.
 
-[Sin publicar]: https://github.com/ManuelAriasCalleja/Markdown-editor/compare/v1.2.0...HEAD
+[Sin publicar]: https://github.com/ManuelAriasCalleja/Markdown-editor/compare/v2.8.4...HEAD
+[2.8.4]: https://github.com/ManuelAriasCalleja/Markdown-editor/compare/v2.8.3...v2.8.4
+[2.8.3]: https://github.com/ManuelAriasCalleja/Markdown-editor/compare/v2.8.2...v2.8.3
+[2.8.2]: https://github.com/ManuelAriasCalleja/Markdown-editor/compare/v2.8.1...v2.8.2
+[2.8.1]: https://github.com/ManuelAriasCalleja/Markdown-editor/compare/v2.8.0...v2.8.1
 [1.2.0]: https://github.com/ManuelAriasCalleja/Markdown-editor/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/ManuelAriasCalleja/Markdown-editor/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/ManuelAriasCalleja/Markdown-editor/compare/v1.0.2...v1.1.0

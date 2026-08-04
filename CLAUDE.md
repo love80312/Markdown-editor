@@ -264,9 +264,10 @@ añadir lógica nueva: hay un `tst_*` por módulo.
   provoca no realimenten el bucle. `flushPendingSync()` (en `focusChanged`) vacía
   el timer pendiente al cambiar de panel para que el destino llegue al día. Se
   preserva el scroll del panel refrescado.
-- **Temas y luz cálida nocturna.** `ThemeController` aplica uno de los 6 temas del
+- **Temas y luz cálida nocturna.** `ThemeController` aplica uno de los 8 temas del
   catálogo declarativo `mdtheme`/`ThemeSpec` (Claro, Oscuro, GitHub Light, GitHub
-  Dark, Monokai, Alto contraste), persiste la clave `theme` (con migración del
+  Dark, Monokai, Alto contraste, Solarized Light, Solarized Dark), persiste la
+  clave `theme` (con migración del
   antiguo booleano `darkTheme`) y recolorea enlaces + resaltado al cambiar. Sobre
   cualquier tema se superpone, **ortogonalmente**, la **luz cálida nocturna**
   (toggle `warmLight`, **activo por defecto**): un tinte cálido **automático y
@@ -298,11 +299,54 @@ añadir lógica nueva: hay un `tst_*` por módulo.
   rutas **no vacías** (el documento nuevo inicial no debe pisarlo).
 - **Zoom de toda la interfaz.** `applyChromeZoom()` escala, partiendo de tamaños
   base, no solo el editor: menú **y cada `QMenu`** (los desplegables no heredan la
-  fuente de la barra), barras, estado, fuente, panel de esquema e iconos de la
-  barra de formato (`updateToolBarIcons`).
-- **`eventFilter` de `MainWindow`.** Es solo un despachador: delega en tres
-  sub-manejadores según el objeto vigilado (cada uno devuelve `bool`, el primero
-  que consume gana): `handleViewportEvent` (zoom con Ctrl+rueda; abrir enlaces con
+  fuente de la barra), barras, estado, fuente, panel de esquema, **rótulos de las
+  pestañas** e iconos de la barra de formato (`updateToolBarIcons`). Las pestañas se
+  escalan en la `QTabBar`, **no** en el `QTabWidget`: la fuente del contenedor se
+  propagaría a los editores de cada pestaña, que llevan su propio tamaño.
+- **Zoom de los diálogos.** Van aparte del resto del chrome porque son **ventanas
+  propias**: Qt no les propaga la fuente del padre (solo con `WA_WindowPropagation`),
+  así que tomaban la de `QApplication` y se quedaban al tamaño base. `applyDialogZoom`
+  se la fija **explícitamente**; la base es siempre `QApplication::font()`, que el
+  zoom no toca, así que reaplicarlo no acumula. Dos decisiones que parecen de más y
+  no lo son:
+  - **No sirve la fuente por clase** (`QApplication::setFont(f, "QDialog")`, como sí
+    se hace con los menús): escala el marco del diálogo, pero **sus hijos no la
+    heredan** —Qt solo hereda del padre si este la tiene puesta a mano o si el hijo
+    no resuelve ninguna fuente de clase, y el tema de la plataforma pone unas
+    cuantas—, así que los rótulos y botones de dentro se quedaban pequeños.
+  - **Quién se la aplica a cada diálogo**: el `eventFilter`, instalado también en
+    `QApplication`, al ver su `QEvent::Polish` (justo antes de mostrarse, y el primer
+    momento en que Qt sabe de qué clase es el widget). Es lo único que los alcanza a
+    todos sin escalarlos uno a uno: los abren `MainWindow`, `EditorStack` y sus
+    controladores, y unos cuantos son de Qt (`QMessageBox`, `QInputDialog`). Los ya
+    abiertos —el manual y el mapa de caracteres son no modales— los re-escala
+    `applyChromeZoom` recorriendo `findChildren<QDialog *>()`. Los diálogos nativos
+    del sistema (`QFileDialog` en Linux) los pinta el escritorio: van a su aire.
+
+  Un diálogo que derive tamaños de su propia fuente **al construirse** no se entera
+  (el Polish llega después): el mapa de caracteres (`SymbolPicker`, símbolos a ×1.4 y
+  su celda) y el ancho del índice del manual lo recalculan en `changeEvent`
+  (`QEvent::FontChange`), y el diálogo de fórmulas y «Acerca de» se adelantan con
+  `ensurePolished()` antes de medir con esa fuente. Nada de esto puede ser un tamaño
+  fijo en píxeles: con el zoom subido, el texto no cabe en la casilla.
+- **Tamaño de las ventanas de texto con el zoom.** Escalar solo la fuente no basta en
+  las ventanas que son texto corrido: en el mismo ancho en píxeles cabe menos y las
+  líneas se parten de forma poco natural. La ventana tiene que crecer con la fuente:
+  - **Manual** (`HelpDialog::updateWindowSize`, en cada `FontChange`): parte del
+    tamaño cómodo con la fuente base (820×620) y lo escala por lo que haya crecido
+    esta, sin pasar del 90 % de la pantalla. El cálculo puro es
+    `chromezoom::scaledWindowSize`.
+  - **«Acerca de»** es un `QMessageBox`, que decide él el ancho del texto y a la
+    medida de la fuente base. Quitarle el ajuste de línea al rótulo **no vale** (se lo
+    vuelve a poner al mostrarse); lo que sí respeta es el mínimo de su rejilla, así
+    que se le mete un `QSpacerItem` del ancho que piden las frases medidas con la
+    fuente real. Depende de cómo Qt maqueta el `QMessageBox`: lo vigila
+    `aboutBoxWidensWithZoom` en `tst_chromezoom`.
+- **`eventFilter` de `MainWindow`.** Está instalado en los editores de la pestaña
+  activa **y en `QApplication`** (esto último solo para el `QEvent::Polish` de los
+  diálogos, ver «Zoom de los diálogos»); por lo demás es un despachador: delega en
+  tres sub-manejadores según el objeto vigilado (cada uno devuelve `bool`, el
+  primero que consume gana): `handleViewportEvent` (zoom con Ctrl+rueda; abrir enlaces con
   Ctrl+clic/hover; arrastrar-soltar un archivo; clic sobre la casilla de una tarea
   `mdtask` y sobre una referencia de nota al pie `mdfootnote`), `handleEditorKeyPress`
   (protección de fórmulas, shortcodes `:nombre:` y **auto-emparejado** en `m_editor`)
@@ -397,9 +441,25 @@ añadir lógica nueva: hay un `tst_*` por módulo.
   `SpellChecker` (se lo enchufa al highlighter), el interruptor activado/
   desactivado y el menú contextual de sugerencias. `applyLanguage()` elige el
   diccionario por el idioma del documento (front matter › ajuste › locale) en cada
-  `documentLoaded` y al arrancar, y rehace el resaltado; si falta el diccionario
-  emite `statusMessage`. La lista personal vive en
+  `documentLoaded` y al arrancar, y rehace el resaltado. La lista personal vive en
   `AppSettings::personalDictionary`.
+  **Cuando falta el diccionario** no basta con degradar en silencio (el usuario no
+  sabe por qué no se subraya nada): además del mensaje de la barra de estado, sale
+  un aviso —**una vez por idioma y sesión**, con «No volver a avisar» persistido en
+  `AppSettings::spellMissingWarning`— que dice qué falta y **cómo instalarlo**: en
+  Linux la orden del gestor de paquetes de SU distribución
+  (`mdspell::dictionaryInstallCommand`, por `QSysInfo::productType()`), y en
+  Windows/macOS la carpeta donde copiarlo. El aviso distingue «falta el
+  diccionario» de «esta build no trae corrector»
+  (`SpellChecker::isEngineAvailable()`): mandar a instalar un diccionario cuando no
+  hay motor es un callejón sin salida. El botón **«Descargar e instalar»**
+  (`DictionaryInstaller`) lo baja del repositorio de LibreOffice a
+  `SpellChecker::userDictionaryDir()` —la primera ruta de búsqueda y la única
+  escribible: dentro de un AppImage o un `.app` no se puede escribir— y recarga el
+  idioma. Es **el único sitio del programa que usa la red**, y solo al pulsar el
+  botón; las URLs (`mdspell::dictionaryUrls`) son la misma tabla que
+  `scripts/fetch-dictionaries.sh`, así que una ruta que cambie upstream hay que
+  tocarla en los dos sitios.
 
 ### Fórmulas TeX (`mdmath`)
 
@@ -709,15 +769,35 @@ necesita un Hunspell con su `.a`/`.lib` estático: Homebrew (`brew install
 hunspell`) o vcpkg (`hunspell:x64-windows-static`). Con `-DSPELL_CHECK_STATIC=OFF`
 vuelve al enlace dinámico.
 
-**Diccionarios del corrector.** Linux usa los del sistema (`/usr/share/hunspell`);
-Windows/macOS no tienen, así que se empaquetan. La carpeta `dictionaries/` (con su
-`README.md`; los `.aff/.dic` están en `.gitignore` por licencias y tamaño) es el
-punto de empaquetado: si tiene ficheros, `CMakeLists.txt` los instala donde
-`SpellChecker::searchPaths()` los busca — junto al `.exe` (Windows), en
-`Contents/Resources/dictionaries` (macOS), o `<prefix>/share/hunspell` (Linux). El
-script `scripts/bundle-dictionaries.sh` copia ahí los del sistema (los 9 idiomas
-de la interfaz) para una build de Win/Mac. Es un bloque `install` **condicional**
-(vacío = no-op), así que no afecta a la build de Linux.
+**El motor tiene que ir en el paquete, y eso no se ve.** Hasta la 2.8.3 inclusive,
+los tres binarios descargables salieron **sin corrector**: `release.yml` no
+instalaba Hunspell en ningún sistema, CMake dejaba `HAVE_HUNSPELL` sin definir y
+`SpellChecker` compilaba como stub inerte. Nada lo avisaba —«no encontrado» era un
+simple `message(STATUS)`— y los tests del corrector pasan igual (se saltan solos
+sin motor). Dos defensas contra que se repita: los jobs de release configuran con
+**`SPELL_CHECK_REQUIRED=ON`**, que convierte «Hunspell no encontrado» en error de
+configuración, y la detección tiene **respaldo sin `pkg-config`**
+(`find_path`/`find_library`), que es lo que dejaba fuera a Windows. Cómo se obtiene
+el motor en cada job: `libhunspell-dev` (Linux), vcpkg
+`hunspell:x64-windows-static-md` —estático pero con CRT dinámico, como Qt— y, en
+macOS, **compilado de fuente universal** (`-arch arm64 -arch x86_64`): `brew
+install hunspell` solo da la arquitectura del runner y la mitad x86_64 no
+enlazaría.
+
+**Diccionarios del corrector.** Linux usa los del sistema (`/usr/share/hunspell`) y
+**no los empaqueta** (duplicarían 5 MB de lo que el escritorio ya suele traer);
+Windows y macOS no tienen ninguno, así que viajan los **9 idiomas de la interfaz**
+dentro del paquete. No están en el repositorio (`.gitignore`: son de terceros,
+pesan 24 MB sin comprimir y cambian por su cuenta): los trae al empaquetar
+`scripts/fetch-dictionaries.sh <destino>` desde el repositorio de diccionarios de
+LibreOffice, con las licencias de cada idioma en `licenses/<idioma>/` y un
+`THIRDPARTY-DICTIONARIES.txt`. Ojo con los nombres: el destino se normaliza a
+`<idioma>_<REGIÓN>` porque upstream el alemán es `de_DE_frami` y el francés
+`fr_FR/dictionaries/fr`, y con esos nombres `mdspell::pickDictionary` no los
+encontraría. El script no usa `python`/`jq` a propósito: corre también en el runner
+de Windows (Git Bash). Sigue existiendo `scripts/bundle-dictionaries.sh`, que copia
+los del sistema para una build local de Win/Mac, y el bloque `install` condicional
+de `dictionaries/` para quien prefiera esa vía.
 
 ## Internacionalización (importante y con trampas)
 

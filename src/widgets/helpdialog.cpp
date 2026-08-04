@@ -4,11 +4,16 @@
 #include "helpdialog.h"
 
 #include "appsettings.h"
+#include "chromezoom.h"
 
+#include <QApplication>
+#include <QEvent>
 #include <QFile>
+#include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QListWidget>
 #include <QLocale>
+#include <QScreen>
 #include <QScrollBar>
 #include <QTextBlock>
 #include <QTextBrowser>
@@ -41,12 +46,12 @@ QString helpSuffix()
     }
 }
 
-// Ancla (slug) de un encabezado, con la misma regla que usan los enlaces del
-// índice en los .md de ayuda: minúsculas, sin acentos (se descomponen y se
-// descartan las marcas), la puntuación se borra y los espacios/guiones colapsan a
-// un único guion. Así `## Enlaces e imágenes` → `enlaces-e-imagenes`, que es el
-// destino que escribe `[Enlaces e imágenes](#enlaces-e-imagenes)`.
-QString headingSlug(const QString &text)
+}  // namespace
+
+// Declarada en helpdialog.h (namespace mdhelp) para que tst_help pueda validar
+// con ella los índices de los 18 .md de ayuda: cada `](#ancla)` del índice tiene
+// que caer en un encabezado real, en los nueve idiomas.
+QString mdhelp::headingSlug(const QString &text)
 {
     const QString decomposed = text.normalized(QString::NormalizationForm_D);
     QString slug;
@@ -70,19 +75,16 @@ QString headingSlug(const QString &text)
     return slug;
 }
 
-} // namespace
-
 HelpDialog::HelpDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Ayuda"));
-    // Tamaño cómodo para leer y, a la vez, dejar el editor visible al lado.
-    resize(820, 620);
+    updateWindowSize();
 
     m_index = new QListWidget(this);
     m_index->addItem(tr("Uso de la aplicación"));
     m_index->addItem(tr("Markdown"));
-    m_index->setFixedWidth(200);
+    updateIndexWidth();
 
     m_viewer = new QTextBrowser(this);
     // Que la navegación por anclas internas (#enlace) funcione, pero las
@@ -101,6 +103,46 @@ HelpDialog::HelpDialog(QWidget *parent)
         loadPage(QStringLiteral(":/help/") + page + suffix + QStringLiteral(".md"));
     });
     m_index->setCurrentRow(0);
+}
+
+void HelpDialog::changeEvent(QEvent *event)
+{
+    QDialog::changeEvent(event);
+    // La fuente la fija MainWindow (zoom de la interfaz) después de construir el
+    // diálogo, y puede volver a cambiarla mientras está abierto: el ancho del índice
+    // y el de la propia ventana tienen que seguirla.
+    if (event->type() == QEvent::FontChange) {
+        updateIndexWidth();
+        updateWindowSize();
+    }
+}
+
+void HelpDialog::updateWindowSize()
+{
+    // Tamaño cómodo para leer y, a la vez, dejar el editor visible al lado… con la
+    // fuente base. Cuando el zoom de la interfaz la amplía, en ese mismo ancho cabe
+    // menos texto y las líneas se parten de forma poco natural, así que la ventana
+    // crece en la misma proporción (sin pasar de lo que quepa en la pantalla).
+    static const QSize kBaseSize(820, 620);
+    const qreal appPoints = QApplication::font().pointSizeF();
+    const qreal points = font().pointSizeF();
+    if (appPoints <= 0 || points <= 0)
+        return;
+    QSize limit;
+    if (const QScreen *scr = screen())
+        limit = scr->availableGeometry().size() * 0.9;
+    resize(chromezoom::scaledWindowSize(kBaseSize, points / appPoints, limit));
+}
+
+void HelpDialog::updateIndexWidth()
+{
+    const QFontMetrics fm(m_index->font());
+    int text = 0;
+    for (int row = 0; row < m_index->count(); ++row)
+        text = qMax(text, fm.horizontalAdvance(m_index->item(row)->text()));
+    // Margen para el relleno del ítem y el marco. Se expresa en alturas de línea
+    // (no en píxeles fijos) para que crezca con la fuente igual que el texto.
+    m_index->setFixedWidth(text + fm.height() * 3 + m_index->frameWidth() * 2);
 }
 
 void HelpDialog::loadPage(const QString &resourcePath)
@@ -122,7 +164,7 @@ void HelpDialog::loadPage(const QString &resourcePath)
     for (QTextBlock b = doc->begin(); b != doc->end(); b = b.next()) {
         if (b.blockFormat().headingLevel() <= 0)
             continue;
-        const QString slug = headingSlug(b.text());
+        const QString slug = mdhelp::headingSlug(b.text());
         if (slug.isEmpty())
             continue;
         QTextCursor cur(b);
